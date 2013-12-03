@@ -45,4 +45,4 @@ try:
     n.Run()
 except KeyboardInterrupt:
     print "Node interrupted, attempting to send LEAVING_NETWORK message"
-    n.GracefulExit()
+    n.LeaveNetwork()
