@@ -1,6 +1,5 @@
 from node import Node
 import argparse
-import signal
 import socket
 import sys
 
@@ -21,6 +20,8 @@ print args.boot
 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp_socket.bind((UDP_IP, UDP_PORT))
 
+net_id = 0
+
 if args.node_id is None:
     sys.exit("Missing required flag: --node_id.")
 
@@ -38,11 +39,11 @@ else:
         sys.exit("If the --boot flag is not set, the IP of a bootstrap node must be passed with the --bootstrap_ip flag.")        
     # Join the network
     # Contact the bootstrap node based on the bootstrap_id
-    n.JoinNetwork(args.bootstrap_ip)
+    net_id = n.JoinNetwork(args.bootstrap_ip)
     # Wait to get the ROUTING_INFO
 
 try:
     n.Run()
 except KeyboardInterrupt:
     print "Node interrupted, attempting to send LEAVING_NETWORK message"
-    n.LeaveNetwork()
+    n.LeaveNetwork(net_id)
