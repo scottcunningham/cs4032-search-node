@@ -2,27 +2,35 @@ import json
 from thread import start_new_thread
 import messages
 import random
+import hashing
 import leveldb
 
-# Because the protocol depends on integer overflow, we have to do these ridiculous things
-from numpy import int32
-import warnings
-warnings.simplefilter("ignore", RuntimeWarning)
-
 UDP_PORT = 8767
-BACKOFF_TIME_MS = 5000
-
-def node(node_id, ip_address):
-	return { "node_id" : node_id, "ip_address" : ip_address }
 
 class Node:
-	def __init__(self, udp_socket, node_id):
+        # Node takes node_id in its ctor - this is divergent for the spec.
+        # However, this makes more sense than taking it in JoinNetwork - 
+        # otherwise, the first node in a network would not know its id
+	# This constructor does the job of the init from the spec.
+        def __init__(self, udp_socket, node_id):
 		self.node_id = node_id
 		self.udp_socket = udp_socket
 		self.routing_table = []
 		self.net_id = 0
-		# Need mechanism for dealing with ACKed messages...
-		self.db = leveldb.LevelDB("./db")
+                # The acks_waiting dict is a map of (ip, port) -> threads waiting to be ACKed. The threads count down from 5 seconds and retry messages a few times when the timer runs out. 
+                # The Node can then just tell the thread to stop counting down when an ACK is received for that address
+		self.acks_waiting = {}
+                self.db = leveldb.LevelDB("./db")
+
+	def JoinNetwork(self, bootstrap_node_ip):
+		msg = messages.JoiningNetworkMessage(self.node_id, bootstrap_node_ip)
+		self.SendMessage(msg, bootstrap_node_ip, UDP_PORT)
+		json_message, addr = self.udp_socket.recvfrom(1024)
+		# Wait to get a response from the bootstrap node
+		response = messages.Message(json_message=json_message)
+		self.routing_table = json.loads(response.msg["route_table"])
+		self.net_id = random.randint(0,4096)
+		return self.net_id
 
 	def SendMessage(self, message, destination_ip, destination_port, retries=1):
 		for x in range(retries):
@@ -35,17 +43,7 @@ class Node:
 		data, addr = self.udp_socket.recvfrom(1024)
 		return (data, addr)
 
-	def JoinNetwork(self, bootstrap_node_ip):
-		msg = messages.JoiningNetworkMessage(self.node_id, bootstrap_node_ip)
-		self.SendMessage(msg, bootstrap_node_ip, UDP_PORT)
-		json_message, addr = self.udp_socket.recvfrom(1024)
-		# Wait to get a response from the bootstrap node
-		response = messages.Message(json_message=json_message)
-		self.routing_table = json.loads(response.msg["route_table"])
-		self.net_id = random.randint(0,4096)
-		return self.net_id
-
-	def LeaveNetwork(self, network_id):
+        def LeaveNetwork(self, network_id):
 		if self.net_id is not network_id:
 			print "Invalid net_id passed to leave network - refusing to leave!"
 			return False
@@ -98,14 +96,8 @@ class Node:
 			pass
 		else:
 			print "Junk message from", addr, " - ignoring"
-
-	def HashCode(input_string):
-		code = int32(0)
-		for char in input_string:
-			code = (code * int32((31))) + int32(ord(char))
-		return abs(code)
-
-	def Run(self):
+	
+        def Run(self):
 		while True:
 			data, addr = self.ReceiveMessage()
 			start_new_thread(self.DecodeMessage, (data, addr))
