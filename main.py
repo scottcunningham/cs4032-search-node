@@ -1,3 +1,5 @@
+#!/usr/bin/python2
+
 from node import Node
 import argparse
 import socket
