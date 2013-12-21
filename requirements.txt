@@ -1,1 +1,3 @@
-pif
+ez_setup
+leveldb
+numpy
