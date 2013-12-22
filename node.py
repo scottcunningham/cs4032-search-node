@@ -4,7 +4,7 @@ import random
 import hashing
 import leveldb
 import routing_table
-from ack_thread import *
+import time
 from thread import start_new_thread
 
 class Node:
@@ -91,7 +91,7 @@ class Node:
         response = messages.Message(json_message=json_message)
         # We incorporate all of the bootstrap node's routing table into our own
         self.routing_table_lock.acquire()
-        self.routing_table.from_json(response.msg["route_table"])
+        self.routing_table.from_json(response.msg["routing_table"])
         self.routing_table_lock.release()
         # The NetID isn't used for any external communication, so it doesn't matter
         # if it's random within each client's internals.
@@ -100,9 +100,13 @@ class Node:
 
     def SendMessage(self, message, node_id):
         # Find the closest node and send the message to it
-        destination_ip, closest_node_id = self.routing_table.find_closest_match(node_id, self.node_id)
-        print "Message destined for", node_id, " - sent to ", closest_node_id, " --- ", destination_ip
-        self.udp_socket.sendto(message, (destination_ip, UDP_PORT))
+        closest_node_id = self.routing_table.find_closest_match(node_id, self.node_id)
+        if node_id != self.node_id:
+            destination_ip = self.routing_table[closest_node_id]
+            print "Message destined for", node_id, " - sent to closest id: ", closest_node_id
+            self.udp_socket.sendto(message, (destination_ip, UDP_PORT))
+        else:
+            print "ERROR! No node_id closer to", node_id, "thank our own (,", self.node_id, ")! Abandoning sending!"
 
     def ReceiveMessage(self):
         data, addr = self.udp_socket.recvfrom(MAX_MESSAGE_SIZE)
@@ -121,6 +125,22 @@ class Node:
         return True
         self.routing_table_lock.release()
 
+    def RequestIndex(self, word, urls):
+        ''' Send a request to ask a node to index a URL for a word
+        '''
+        target_id = hashing.HashCode(word)
+        print ">>>>>>>>>", word, urls, target_id
+        msg = messages.IndexMessage(target_id, self.node_id, word, urls).json()
+        # Send the message over the overlay network - ie, not directly (unless possible)
+        closest_id = self.routing_table.find_closest_match(target_id, self.node_id)
+        self.SendMessage(msg, closest_id)
+        # We want an ACK sent back to us over the overlay network
+        self.acks_waiting_lock.acquire()
+        ack_thread = Thread(target=AckThread, args=(target_id, ACK_TIMEOUT_MS))
+        ack_thread.start()
+        self.acks_waiting[target_id] = True
+        self.acks_waiting_lock.release()
+
     def IndexPage(self, url):
         # Since we only index one word, our DB can be an mapping of URL -->
         # frequency of our single word
@@ -137,14 +157,17 @@ class Node:
     def DecodeMessage(self, json_message, addr):
         incoming_message = json.loads(json_message)
         msg_type = incoming_message["type"]
-        # Note: routing_info should not be handled here
-        # it should really never arrive after the node is initialised
+        # Note: routing_info should not be handled here.
+        # it should really never arrive after the node is initialised.
         if msg_type == "JOINING_NETWORK_SIMPLIFIED":
             # A node is joining the network and wants us to 'bootstrap' them.
-            # Send JOINING_NETWORK_RELAY the node CLOSEST to the new node
+            # Send JOINING_NETWORK_RELAY the node CLOSEST to the new node.
             closest_node_id = incoming_message["target_id"]
             relay_msg = messages.JoiningNetworkRelayMessage()
             self.SendMessage(closest_node_id, relay_msg)
+
+            # Add their IP and node_id to our routing table.
+            self.routing_table[joining_node_id] = incoming_message["ip_address"]
 
         elif msg_type == "JOINING_NETWORK_RELAY":
             dest_id = incoming_message["target_id"]
@@ -160,14 +183,14 @@ class Node:
                 # Send them the routing info 
                 self.SendMessage(routing_msg, joining_node_id)
             else:
-                closer_id = self.route_table.find_closest_match(dest_id)
+                closer_id = self.routing_table.find_closest_match(dest_id)
                 self.SendMessage(incoming_message, closer_id)
 
         elif msg_type == "LEAVING_NETWORK":
             # Remove node routing info from routing table if exists
             leaving_node_id = incoming_message["node_id"]
             try:
-                self.route_table.pop(leaving_node_id, None)
+                self.routing_table.pop(leaving_node_id, None)
             except KeyError:
                 print "Tried to remove a node from our routing table that didn't exist"
 
@@ -179,10 +202,15 @@ class Node:
                 for url in incoming_message["link"]:
                     self.IndexPage(url)
                 # Send an ACK to the sender_id so they know we got it
-                # TODO: send ACKs here
+                ack_msg = messages.AckMessage(self.node_id)
+                ack_destination = incoming_message["sender_id"]
+                self.SendMessage(ack_msg, ack_destination)
+                self.acks_waiting_lock.acquire()
+                self.acks_waiting[ack_destination] = True
+                self.acks_waiting_lock.release()
             else:
                 # Not for us to index. Pass it on through the overlay network
-                closer_id = self.route_table.find_closest_match(dest_id)
+                closer_id = self.routing_table.find_closest_match(dest_id)
                 self.SendMessage(incoming_message, closer_id)
 
         elif msg_type == "SEARCH":
@@ -196,11 +224,10 @@ class Node:
                 response = messages.SearchResponse(word, sender_id, self.node_id, self.DumpDBEntries) 
             else:
                 # Not for us, send it over the overlay network
-                closer_id = self.route_table.find_closest_match(dest_id)
+                closer_id = self.routing_table.find_closest_match(dest_id)
                 self.SendMessage(incoming_message, closer_id)
 
         elif msg_type == "SEARCH_RESPONSE":
-            # TODO: Deal with ACKs here
             # Awesome, we got results for the stuff we were searching for
             sender_id = incoming_message["sender_id"]
             word = incoming_message["word"]
@@ -210,12 +237,42 @@ class Node:
         elif msg_type == "PING":
             # PONG 'em
             pass
+
         elif msg_type == "ACK":
             # They got our message
             # Make sure we don't retry again
-            pass
+            sender_id = incoming_message["node_id"]
+            self.acks_waiting_lock.acquire()
+            self.acks_waiting[sender_id] = False
+            self.acks_waiting_lock.release()
+
         else:
             print "Junk message from", addr, " - ignoring"
+        # Check if we're still waiting for a reply from this host 
+
+        # Since we got a message from the sending node, we know it's still alive so we can clear any
+        # ACKs that we are waiting to receive from it.
+        self.acks_waiting_lock.acquire()
+        self.acks_waiting[addr] = False
+        self.acks_waiting_lock.release()
+
+    def AckThreadRun(node_id, timeout_s):
+        # Wait for an ACK for timeout_s
+        time.sleep(timeout_s)
+        # If we have waited until now and have not been stopped by
+        # the calling program, then we have NOT received an ACK
+        # from this node_id yet
+        self.acks_waiting_lock.acquire()
+        if self.acks_waiting[node_id] is True:
+            print "ERROR: No ACK received from node", node_id, " in max timeout (", timeout_ms, "s)"
+            self.acks_waiting[node_id] = False
+            # This person hasn't responded to pings to we can just remove it from our routing table.
+            try:
+                self.routing_table.pop(node_id)
+            except KeyError:
+                pass
+        self.acks_waiting_lock.release()
+
 
     def DumpDBEntries(self):
         dumped = []
@@ -236,7 +293,7 @@ class Node:
                 print url, "--", frequency
 
     def Shell(self):
-        help_msg = "Welcome to the node shell. Commands: search | quit | show | add | ?"
+        help_msg = "Welcome to the node shell. Commands: search | quit | show | add | index | ?"
         print help_msg
         prompt = "n:" + str(self.node_id) + " >> "
         while True:
@@ -258,6 +315,17 @@ class Node:
                 frequency = raw_input("Frequency to store >>")
                 self.db.Put(url, frequency)
                 print "Added URL", url, "with frequency", frequency
+            elif command == "index":
+                word = raw_input("Word to index >> ")
+                url = raw_input("Associated url >> ")
+                print "Sending index request for word, '", word, "' :", url
+                dest_id = hashing.HashCode(word)
+                self.RequestIndex(word, url)
+                self.acks_waiting_lock.acquire()
+                ack_thread = Thread(target=AckThreadRun, args=(dest_id, ACK_TIMEOUT_MS))
+                ack_thread.start()
+                self.acks_waiting[dest_id] = True 
+                self.acks_waiting_lock.release()
             elif command == "?":
                 print help_msg
             else:

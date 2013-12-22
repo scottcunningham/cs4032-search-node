@@ -11,7 +11,9 @@ class RoutingTable(dict):
         # Just parse it into dictionary form -
         # node_id as key and ip as value
         for node in nodes:
-            self[node["node_id"]] = node["ip_address"]
+            # JSON, even when given an integer key to begin with, casts keys to strings
+            # So we have to manually cast them back to integers here.
+            self[int(node["node_id"])] = node["ip_address"]
 
     def to_json(self):
         dictlist = []
@@ -22,9 +24,9 @@ class RoutingTable(dict):
     def find_closest_match(self, target_key, initial_key):
         closest_key = initial_key
 
-        for key in self.iter_keys():
+        for key in self.keys():
             if abs(key - target_key) < abs(closest_key - target_key):
                 closest_key = key
 
         # Pair of (IP, node_id)
-        return (self[closest_key], closest_key)
+        return closest_key

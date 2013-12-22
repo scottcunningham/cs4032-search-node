@@ -4,28 +4,30 @@ from node import Node
 import argparse
 import socket
 import sys
-
-UDP_IP = "127.0.0.1"
-UDP_PORT = 8767
+from constants import *
 
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--port', metavar='p', type=int, help="Port to listen on.", default=8767)
 parser.add_argument('--node_id', type=int, help='NodeID of this node.')
 parser.add_argument('--bootstrap_ip', type=str, help='IP address of bootstrap node to contact.')
 parser.add_argument('--boot',dest='boot',action='store_true',help='Switch to turn on boot mode, enabling this node to start the network')
+parser.add_argument('--ip',dest='ip',help='IP address to listen on.')
 parser.set_defaults(boot=False)
 
 args = parser.parse_args()
 
+if not args.ip:
+    sys.exit("Need to pass --ip=<ip_address>")
+
 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-udp_socket.bind((UDP_IP, UDP_PORT))
+udp_socket.bind((args.ip, UDP_PORT))
 
 net_id = 0
 
 if args.node_id is None:
     sys.exit("Missing required flag: --node_id.")
 
-n = Node(udp_socket, args.node_id)
+n = Node(udp_socket, args.ip, args.node_id)
 
 if args.boot:
     # We are the first node
