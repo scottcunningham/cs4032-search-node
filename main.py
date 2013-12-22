@@ -16,8 +16,6 @@ parser.add_argument('--boot',dest='boot',action='store_true',help='Switch to tur
 parser.set_defaults(boot=False)
 
 args = parser.parse_args()
-print args.port
-print args.boot
 
 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp_socket.bind((UDP_IP, UDP_PORT))
@@ -30,22 +28,21 @@ if args.node_id is None:
 n = Node(udp_socket, args.node_id)
 
 if args.boot:
-    if args.bootstrap_ip is not None:
-        sys.stderr.write("Incompatible arguments --bootstrap_ip and --boot passed simultaneously; ignoring --bootstrap_ip.")
     # We are the first node
     # Just start listening and wait for people 
-
+    if args.bootstrap_ip is not None:
+        sys.stderr.write("Incompatible arguments --bootstrap_ip and --boot passed simultaneously; ignoring --bootstrap_ip.")
 else:
-    pass
     if args.bootstrap_ip is None:
         sys.exit("If the --boot flag is not set, the IP of a bootstrap node must be passed with the --bootstrap_ip flag.")        
     # Join the network
     # Contact the bootstrap node based on the bootstrap_id
     net_id = n.JoinNetwork(args.bootstrap_ip)
-    # Wait to get the ROUTING_INFO
+
+n.Run()
 
 try:
-    n.Run()
+    n.Shell()
 except KeyboardInterrupt:
-    print "Node interrupted, attempting to send LEAVING_NETWORK message"
+    print "Node interrupted, attempting to send LEAVING_NETWORK message for graceful shutdown."
     n.LeaveNetwork(net_id)
