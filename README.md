@@ -1,4 +1,5 @@
-# Node
+# Search Node
+Scott Cunningham // 10311491 // cunninsc@tcd.ie
 
 ## node.py
 The node class differs from the given interface slightly. Python doesn't have
