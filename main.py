@@ -46,6 +46,9 @@ else:
 
 n.Run()
 
+# The running shell can be exited at any time with a CTRL-c.
+# This will attempt a graceful exit of the network through
+# LEAVING_NETWORK messages.
 try:
     n.Shell()
 except KeyboardInterrupt:

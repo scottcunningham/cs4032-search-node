@@ -34,3 +34,6 @@ Instantiates a Node and runs it. Needs one of two sets of command-line arguments
                             --bootstrap_ip=134.226.83.42 --target_id=1337
 Then it runs an interactive shell with the Node where the user can enter
 commands.
+The shell can be quit at any time with a CTRL-c. This interrupts the node and
+attempts to perform a graceful exit from the network through sending
+LeavingNetwork messages.
