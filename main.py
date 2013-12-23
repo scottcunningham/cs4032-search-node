@@ -42,7 +42,7 @@ else:
         sys.exit("If the --boot flag is not set, the id of the closest node must be passed with the --target_id flag.")
     # Join the network
     # Contact the bootstrap node based on the bootstrap_id
-    net_id = n.JoinNetwork(args.bootstrap_ip)
+    net_id = n.JoinNetwork(args.bootstrap_ip, args.target_id)
 
 n.Run()
 
