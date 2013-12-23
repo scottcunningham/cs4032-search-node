@@ -11,6 +11,7 @@ parser.add_argument('--port', metavar='p', type=int, help="Port to listen on.", 
 parser.add_argument('--node_id', type=int, help='NodeID of this node.')
 parser.add_argument('--bootstrap_ip', type=str, help='IP address of bootstrap node to contact.')
 parser.add_argument('--boot',dest='boot',action='store_true',help='Switch to turn on boot mode, enabling this node to start the network')
+parser.add_argument('--target_id',help='Numerically closest ID to own ID in the network.')
 parser.add_argument('--ip',dest='ip',help='IP address to listen on.')
 parser.set_defaults(boot=False)
 
@@ -37,6 +38,8 @@ if args.boot:
 else:
     if args.bootstrap_ip is None:
         sys.exit("If the --boot flag is not set, the IP of a bootstrap node must be passed with the --bootstrap_ip flag.")        
+    if args.target_id is None:
+        sys.exit("If the --boot flag is not set, the id of the closest node must be passed with the --target_id flag.")
     # Join the network
     # Contact the bootstrap node based on the bootstrap_id
     net_id = n.JoinNetwork(args.bootstrap_ip)

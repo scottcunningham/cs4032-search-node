@@ -19,19 +19,28 @@ class Node:
 
         If the node is not the first node in the network, you can tell it to
         join a network if you know an existing node:
-        n.JoinNetwork(bootstrap_node_ip)
+        net_id = n.JoinNetwork(bootstrap_node_ip)
 
         You can interface with the node while it is running like so:
 
         n.Search(["abc", "hello", "keyword"])
 
-        Which will eventually return results or timeout errors.
+        Which will asynchronously print results or timeout errors.
 
-        Then, to stop it:
+        The Node class has an interactive shell that self-documents:
+        n.Shell()
 
-        same_net_id = n.LeaveNetwork() 
+        This lets you search, dump DB contents, request indexes, and generally
+        interface with the Node for debugging.
+
+        Stop the node as follows:
+
+        n.LeaveNetwork(net_id) 
         
-        Which returns the same net_id as before (as per the spec).
+        Which takes the same net_id as was generated before (as per the spec).
+
+        The class uses LevelDB for storage, which is a string -> string 
+        key-value store that persists on disk after the program exits.
     '''
 
     def __init__(self, udp_socket, ip_address, node_id):
@@ -80,13 +89,13 @@ class Node:
             data, addr = self.ReceiveMessage()
             start_new_thread(self.DecodeMessage, (data, addr))
 
-    def JoinNetwork(self, bootstrap_node_ip):
+    def JoinNetwork(self, target_id, bootstrap_node_ip):
         ''' Joins a network through a node on IP bootstrap_node_ip.
         
         Arguments:
             bootstrap_node_ip: The IP address of the node through which we will join a network.
         '''
-        msg = messages.JoiningNetworkMessage(self.node_id, bootstrap_node_ip)
+        msg = messages.JoiningNetworkMessage(self.node_id, target_id, bootstrap_node_ip)
         self.SendMessage(msg, bootstrap_node_ip, UDP_PORT)
         # Wait to get a response from the bootstrap node
         json_message, addr = self.udp_socket.recvfrom(MAX_MESSAGE_SIZE)
@@ -168,7 +177,7 @@ class Node:
                 # Send JOINING_NETWORK_RELAY the node CLOSEST to the new node.
                 closest_node_id = incoming_message["target_id"]
                 relay_msg = messages.JoiningNetworkRelayMessage()
-                self.SendMessage(closest_node_id, relay_msg)
+                self.SendMessage(relay_msg, closest_node_id)
 
                 # Add their IP and node_id to our routing table.
                 self.routing_table[joining_node_id] = incoming_message["ip_address"]
